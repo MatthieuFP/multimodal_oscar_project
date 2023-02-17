@@ -1,0 +1,2 @@
+fastwarc=0.13.7
+beautifulsoup4=4.11.2
