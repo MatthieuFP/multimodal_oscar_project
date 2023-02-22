@@ -3,52 +3,63 @@ sys.setrecursionlimit(40000)
 from tqdm import tqdm
 from fastwarc.warc import ArchiveIterator, is_http
 from fastwarc.stream_io import *
-from bs4 import BeautifulSoup
+from resiliparse.parse.html import HTMLTree, traverse_dom, DOMNode, DOMContext
 
 file = "CC-MAIN-20220924151538-20220924181538-00000.warc.gz"
 stream = GZipStream(open(file, 'rb'))
 
 
+class SaveDocument:
+    def __init__(self):
+        self.document = []
+        self.images = []
+        self.url = {}
+        self.lang = None
+    def add_url(self, url):
+        self.url[url] = 1
+    def check_url(self, url):
+        return True if url in self.url.keys() else False
+
+
+def save_node(node_ctx: DOMContext):
+    global img_tag, txt_tag
+    node = node_ctx.node
+    depth = node_ctx.depth
+    if node.tag == "img":
+        if "src" in node.attrs and node["src"].startswith("http") and node["src"].endswith(
+                ("jpg", "jpeg", "png")):
+            img_tag = True
+            sample = {"url": node["src"], "depth": depth}
+            if not Document.check_url(node["src"]):
+                Document.add_url(node["src"])
+                if "alt" in node.attrs:
+                    _alt = node["alt"].strip().strip('\n')
+                    if _alt:
+                        txt_tag = True
+                        sample["alt"] = _alt
+                Document.images.append(sample)
+    else:
+        if node.tag == "p" or (node.tag.startswith("h") and len(node.tag) == 2):
+            if node.text:
+                text = node.text.strip().strip("\n")
+                text = text.replace("\t", "").replace("\n", "").strip()
+                if text:
+                    txt_tag = True
+                    Document.document.append({"tag": node.tag, "depth": depth, "text": text})
+
+
 out = {}
 for record in tqdm(ArchiveIterator(stream, func_filter=is_http)):
+    img_tag, txt_tag = False, False
     if record.content_length > 1000:  # Bytes limit
         body = record.reader.read()
-        soup = BeautifulSoup(body)
+        tree = HTMLTree.parse_from_bytes(body)
         imgs = []
-        for img_sample in soup.find_all('img'):
-            any_txt = False
-            if "src" in img_sample.attrs.keys() and img_sample.attrs["src"].startswith("http"):
-
-                sample_out = {"url": img_sample.attrs["src"]}
-
-                # Alt-text
-                if "alt" in img_sample.attrs.keys() and img_sample.attrs["alt"]:
-                    any_txt = True
-                    sample_out["alt"] = img_sample.attrs["alt"]
-
-                # Paragraphs
-                p_parents = img_sample.find_parents("p")
-                p_parents = [parent.text for parent in p_parents if parent.text != "\n" and parent.text.strip() != ""]
-                if p_parents:
-                    any_txt = True
-                    sample_out["p"] = p_parents
-
-                # Headers
-                parents_name = []
-                for tree in img_sample.find_parents():
-                    parents_name.append(tree.name)
-                for head_tag in [f"h{str(i)}" for i in range(1, 7)]:
-                    if head_tag in parents_name:
-                        txt = img_sample.find_parent(head_tag).text
-                        txt = txt.strip("\n").strip()
-                        if txt:
-                            any_txt = True
-                            sample_out[head_tag] = txt
-
-                # Save sample
-                if any_txt:
-                    imgs.append(sample_out)
-
-        title = soup.title.text if soup.title is not None else ""
-        if imgs:
-            out[record.headers['WARC-Record-ID']] = {"title": "", "images": imgs}
+        Document = SaveDocument()
+        # Extract lang
+        if "lang" in tree.document.get_elements_by_tag_name("html")[0].attrs:
+            Document.lang = tree.document.get_elements_by_tag_name("html")[0]["lang"]
+        traverse_dom(base_node=tree.document, start_callback=save_node, elements_only=False)
+        title = tree.title.strip().strip("\n")
+        if img_tag and txt_tag:
+            out[record.headers['WARC-Record-ID']] = {"title": title, "document": Document}
