@@ -23,7 +23,7 @@ class SaveDocument:
 
     def check_url(self, url):
         return True if url in self.url.keys() else False
-    
+
     def is_valid(self):
         if not self.images:
             return False
@@ -76,7 +76,7 @@ def process_html(record):
 
 
 def main():
-    pool = Pool(cpu_count() // 2)
+    pool = Pool(cpu_count())
     warc_iter = ArchiveIterator(stream, func_filter=is_http)
     iterator = pool.imap_unordered(process_html, warc_iter)
     iterator = tqdm(iterator, desc='Processing HTML')
