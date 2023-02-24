@@ -13,7 +13,7 @@ import pyarrow as pa
 
 
 file = "CC-MAIN-20220924151538-20220924181538-00000.warc.gz"
-path = os.path.join(os.environ.get("STORE"), file)
+path = os.path.join(os.environ.get("STORE"), "common-crawl-dumps", file)
 stream = GZipStream(open(path, 'rb'))
 
 
