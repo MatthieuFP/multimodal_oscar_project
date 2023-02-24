@@ -84,9 +84,9 @@ def process_html(record):
 
 
 def main(params):
-    pool = Pool(cpu_count())
     warc_iter = ArchiveIterator(stream, func_filter=is_http)
     if not params.disable_multiprocessing:
+        pool = Pool(cpu_count())
         iterator = pool.imap_unordered(process_html, warc_iter)
         iterator = tqdm(iterator, desc='Processing HTML')
         out = {k: v for sample in iterator if sample is not None for k, v in sample.items()}
@@ -94,7 +94,8 @@ def main(params):
         out = {}
         for record in tqdm(warc_iter, desc='Processing HTML'):
             sample = process_html(record)
-            out.update(sample)
+            if sample is not None:
+                out.update(sample)
     return out
 
 
@@ -107,7 +108,7 @@ if __name__ == "__main__":
                         help="debugging")
     params = parser.parse_args()
 
-    if params.debug:
+    if not params.debug:
         pdb.set_trace = lambda: None
 
     out = main(params)
