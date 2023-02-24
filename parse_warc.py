@@ -1,13 +1,20 @@
 import sys
+import os
+import pdb
+import argparse
 sys.setrecursionlimit(40000)
 from tqdm import tqdm
 from fastwarc.warc import ArchiveIterator, is_http
 from fastwarc.stream_io import *
 from resiliparse.parse.html import HTMLTree, traverse_dom, DOMNode, DOMContext
 from multiprocessing import Pool, cpu_count
+import pyarrow.parquet as pq
+import pyarrow as pa
+
 
 file = "CC-MAIN-20220924151538-20220924181538-00000.warc.gz"
-stream = GZipStream(open(file, 'rb'))
+path = os.path.join(os.environ.get("STORE"), file)
+stream = GZipStream(open(path, 'rb'))
 
 
 class SaveDocument:
@@ -36,6 +43,7 @@ class SaveDocument:
 def save_node(node_ctx: DOMContext, Document: SaveDocument):
     node = node_ctx.node
     depth = node_ctx.depth
+    pdb.set_trace()
     if node.tag == "img":
         if "src" in node.attrs and node["src"].startswith("http") and node["src"].endswith(
                 ("jpg", "jpeg", "png")):
@@ -75,14 +83,31 @@ def process_html(record):
         return None
 
 
-def main():
+def main(params):
     pool = Pool(cpu_count())
     warc_iter = ArchiveIterator(stream, func_filter=is_http)
-    iterator = pool.imap_unordered(process_html, warc_iter)
-    iterator = tqdm(iterator, desc='Processing HTML')
-    out = {k: v for sample in iterator if sample is not None for k, v in sample.items()}
+    if not params.disable_multiprocessing:
+        iterator = pool.imap_unordered(process_html, warc_iter)
+        iterator = tqdm(iterator, desc='Processing HTML')
+        out = {k: v for sample in iterator if sample is not None for k, v in sample.items()}
+    else:
+        out = {}
+        for record in tqdm(warc_iter, desc='Processing HTML'):
+            sample = process_html(record)
+            out.update(sample)
     return out
 
 
 if __name__ == "__main__":
-    out = main()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--disable_multiprocessing", action="store_true",
+                        help="Disable multiprocessing")
+    parser.add_argument("--debug", action="store_true",
+                        help="debugging")
+    params = parser.parse_args()
+
+    if params.debug:
+        pdb.set_trace = lambda: None
+
+    out = main(params)
