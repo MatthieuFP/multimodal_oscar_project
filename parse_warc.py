@@ -10,6 +10,7 @@ from resiliparse.parse.html import HTMLTree, traverse_dom, DOMNode, DOMContext
 from multiprocessing import Pool, cpu_count
 import pyarrow.parquet as pq
 import pyarrow as pa
+from data_structure import SaveDocument, build_graph
 
 
 file = "CC-MAIN-20220924151538-20220924181538-00000.warc.gz"
@@ -17,37 +18,18 @@ path = os.path.join(os.environ.get("STORE"), "common-crawl-dumps", file)
 stream = GZipStream(open(path, 'rb'))
 
 
-class SaveDocument:
-    def __init__(self):
-        self.document = []
-        self.images = []
-        self.url = {}
-        self.lang = None
-        self.alt_detected = False
-
-    def add_url(self, url):
-        self.url[url] = 1
-
-    def check_url(self, url):
-        return True if url in self.url.keys() else False
-
-    def is_valid(self):
-        if not self.images:
-            return False
-        elif self.images and not self.alt_detected and not self.document:
-            return False
-        else:
-            return True
-
-
 def save_node(node_ctx: DOMContext, Document: SaveDocument):
     node = node_ctx.node
     depth = node_ctx.depth
-    pdb.set_trace()
+    if Document.prev_depth is None:
+        Document.prev_depth = depth
+    if depth < len(Document.current_path_to_root):
+        Document.update_path_to_root(depth)
+
     if node.tag == "img":
         if "src" in node.attrs and node["src"].startswith("http") and node["src"].endswith(
                 ("jpg", "jpeg", "png")):
-            sample = {"url": node["src"], "depth": depth}
+            sample = {"url": node["src"], "depth": depth, "alt": "", "path_to_root": Document.current_path_to_root}
             if not Document.check_url(node["src"]):
                 Document.add_url(node["src"])
                 if "alt" in node.attrs:
@@ -55,14 +37,27 @@ def save_node(node_ctx: DOMContext, Document: SaveDocument):
                     if _alt:
                         Document.alt_detected = True
                         sample["alt"] = _alt
-                Document.images.append(sample)
+
+                # Add image node to document
+                img_idx = Document.cur_img_idx
+                Document.image_nodes[img_idx] = sample
+                Document.increment_idx()
     else:
         if node.tag == "p" or (node.tag.startswith("h") and len(node.tag) == 2):
             if node.text:
                 text = node.text.strip().strip("\n")
                 text = text.replace("\t", "").replace("\n", "").strip()
                 if text:
-                    Document.document.append({"tag": node.tag, "depth": depth, "text": text})
+                    sample = {"tag": node.tag, "depth": depth, "text": text, "text_tree_id": Document.node_idx,
+                              "path_to_root": Document.current_path_to_root}
+
+                    # Add text node to document
+                    txt_idx = Document.cur_txt_idx
+                    Document.text_nodes[txt_idx] = sample
+                    Document.increment_idx(text_node=True)
+
+    Document.current_path_to_root.append(Document.node_idx)
+    Document.increment_node_idx()
 
 
 def process_html(record):
@@ -76,6 +71,7 @@ def process_html(record):
         traverse_dom(base_node=tree.document, start_callback=lambda node: save_node(node, Document), elements_only=False)
         title = tree.title.strip().strip("\n")
         if Document.is_valid():
+            Document = build_graph(Document)
             return {record.headers['WARC-Record-ID']: {"title": title, "document": Document}}
         else:
             return None
