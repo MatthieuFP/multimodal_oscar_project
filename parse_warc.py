@@ -12,10 +12,10 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 from data_structure import SaveDocument, build_graph
 import fasttext
-from pyspark import SparkContext
+from pyspark import SparkContext, SparkConf
 from pyspark.sql import SparkSession
 from pyspark.sql import HiveContext
-from pyspark.sql.types import *
+import pyspark.sql.types as T
 import json
 
 dir_model = os.path.join(os.environ.get("STORE"), "fastText")
@@ -121,40 +121,39 @@ if __name__ == "__main__":
         pdb.set_trace = lambda: None
 
     out = main(params)
-    """
-    sc = SparkContext()
-    hc = HiveContext(sc)
-    nested_df = hc.read.json(sc.parallelize(out))
-    """
 
-    spark = SparkSession.builder.appName("SaveNestedDict").getOrCreate()
-
-    schema = StructType([
-        StructField("warc_id", StringType(), True),
-        StructField("title", StringType(), True),
-        StructField("lang_id", StringType(), True),
-        StructField("meta_image", StructType([
-            StructField("img_idx", StringType(), True),
-            StructField("depth", IntegerType(), True),
-            StructField("alt", StringType(), True),
-            StructField("meta_text", StructType([
-                StructField("text_idx", StringType(), True),
-                StructField("nearest_common_ancestor", IntegerType(), True),
-                StructField("is_parent", IntegerType(), True),
-                StructField("relative_depth", IntegerType(), True)
-                ])),
-            StructField("url", StringType(), True)
-            ])),
-        StructField("text", StructType([
-            StructField("text_idx", StringType(), True),
-            StructField("tag", StringType(), True),
-            StructField("depth", IntegerType(), True),
-            StructField("text", StringType(), True),
-            StructField("text_tree_id", StringType(), True)
-        ]))
+    schema = pa.schema([
+        ("warc_id", pa.string()),
+        ("title", pa.string()),
+        ("lang_id", pa.string()),
+        ("meta_image", pa.list_(
+            pa.struct([
+                pa.field("url", pa.string()),
+                pa.field("depth", pa.int32()),
+                pa.field("alt", pa.string()),
+                pa.field("img_idx", pa.string()),
+                pa.field("meta_text", pa.list_(
+                    pa.struct([
+                        pa.field("text_idx", pa.string()),
+                        pa.field("nearest_common_ancestor", pa.int32()),
+                        pa.field("is_parent", pa.int32()),
+                        pa.field("relative_depth", pa.int32())
+                    ])
+                ))
+            ])
+        )),
+        ("text", pa.list_(
+            pa.struct([
+                pa.field("text_idx", pa.string()),
+                pa.field("tag", pa.string()),
+                pa.field("depth", pa.int32()),
+                pa.field("text", pa.string()),
+                pa.field("text_tree_id", pa.string())
+            ])
+        ))
     ])
 
+    # Convert the nested dictionary to a PyArrow Table
+    table = pa.Table.from_pylist(out, schema=schema)
+    
     pdb.set_trace()
-
-    df = spark.createDataFrame(data=out, schema=schema)
-    df.show(10)
