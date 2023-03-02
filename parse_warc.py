@@ -12,11 +12,7 @@ import pyarrow.parquet as pq
 import pyarrow as pa
 from data_structure import SaveDocument, build_graph
 import fasttext
-from pyspark import SparkContext, SparkConf
-from pyspark.sql import SparkSession
-from pyspark.sql import HiveContext
-import pyspark.sql.types as T
-import json
+
 
 dir_model = os.path.join(os.environ.get("STORE"), "fastText")
 model = fasttext.load_model(os.path.join(dir_model, "lid.176.bin"))
