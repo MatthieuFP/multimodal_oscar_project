@@ -55,14 +55,14 @@ def build_graph(document: SaveDocument):
                                                                                  text_node["path_to_root"]),
                               "is_parent": is_parent(im_node["path_to_root"], text_node["text_tree_id"]),
                               "relative_depth": im_node["depth"] - text_node["depth"]})
-            if im_idx == "#000000":
-                document.text_nodes[txt_idx].pop("path_to_root")
                 
         im_node.pop("path_to_root")
         im_node["img_idx"] = im_idx
         im_node["meta_text"] = meta_text
         document.image_nodes.append(im_node)
-        document.text_nodes = [{"text_idx": k, **v} for k, v in txt_copy.items()]
+
+        document.text_nodes = [{"text_idx": k, **{_k: _v for _k, _v in v.items() if _k != "path_to_root"}}
+                               for k, v in txt_copy.items()]
     return document
 
 
