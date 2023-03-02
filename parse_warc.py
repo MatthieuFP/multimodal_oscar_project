@@ -11,6 +11,15 @@ from multiprocessing import Pool, cpu_count
 import pyarrow.parquet as pq
 import pyarrow as pa
 from data_structure import SaveDocument, build_graph
+import fasttext
+from pyspark import SparkContext
+from pyspark.sql import SparkSession
+from pyspark.sql import HiveContext
+from pyspark.sql.types import *
+import json
+
+dir_model = os.path.join(os.environ.get("STORE"), "fastText")
+model = fasttext.load_model(os.path.join(dir_model, "lid.176.bin"))
 
 
 file = "CC-MAIN-20220924151538-20220924181538-00000.warc.gz"
@@ -72,7 +81,11 @@ def process_html(record):
         title = tree.title.strip().strip("\n")
         if Document.is_valid():
             Document = build_graph(Document)
-            return {record.headers['WARC-Record-ID']: {"title": title, "document": Document}}
+            return {"warc_id": record.headers['WARC-Record-ID'],
+                    "title": title,
+                    "lang_id": Document.lang,
+                    "meta_image": Document.image_nodes,
+                    "text": Document.text_nodes}
         else:
             return None
     else:
@@ -87,11 +100,11 @@ def main(params):
         iterator = tqdm(iterator, desc='Processing HTML')
         out = {k: v for sample in iterator if sample is not None for k, v in sample.items()}
     else:
-        out = {}
+        out = []
         for record in tqdm(warc_iter, desc='Processing HTML'):
             sample = process_html(record)
             if sample is not None:
-                out.update(sample)
+                out.append(sample)
     return out
 
 
@@ -108,3 +121,40 @@ if __name__ == "__main__":
         pdb.set_trace = lambda: None
 
     out = main(params)
+    """
+    sc = SparkContext()
+    hc = HiveContext(sc)
+    nested_df = hc.read.json(sc.parallelize(out))
+    """
+
+    spark = SparkSession.builder.appName("SaveNestedDict").getOrCreate()
+
+    schema = StructType([
+        StructField("warc_id", StringType(), True),
+        StructField("title", StringType(), True),
+        StructField("lang_id", StringType(), True),
+        StructField("meta_image", StructType([
+            StructField("img_idx", StringType(), True),
+            StructField("depth", IntegerType(), True),
+            StructField("alt", StringType(), True),
+            StructField("meta_text", StructType([
+                StructField("text_idx", StringType(), True),
+                StructField("nearest_common_ancestor", IntegerType(), True),
+                StructField("is_parent", IntegerType(), True),
+                StructField("relative_depth", IntegerType(), True)
+                ])),
+            StructField("url", StringType(), True)
+            ])),
+        StructField("text", StructType([
+            StructField("text_idx", StringType(), True),
+            StructField("tag", StringType(), True),
+            StructField("depth", IntegerType(), True),
+            StructField("text", StringType(), True),
+            StructField("text_tree_id", StringType(), True)
+        ]))
+    ])
+
+    pdb.set_trace()
+
+    df = spark.createDataFrame(data=out, schema=schema)
+    df.show(10)

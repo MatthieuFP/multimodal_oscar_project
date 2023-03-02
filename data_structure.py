@@ -1,9 +1,12 @@
+import copy
+
+
 class SaveDocument:
     def __init__(self):
         self.image_nodes = {}
         self.text_nodes = {}
         self.url = {}
-        self.lang = None
+        self.lang = ""
         self.alt_detected = False
         self.prev_depth = None
         self.current_path_to_root = []
@@ -41,17 +44,25 @@ class SaveDocument:
 
 
 def build_graph(document: SaveDocument):
-    img_copy = document.image_nodes.copy()
+    img_copy = copy.deepcopy(document.image_nodes)
+    txt_copy = copy.deepcopy(document.text_nodes)
+    document.image_nodes = []
     for im_idx, im_node in img_copy.items():
-        meta_text = {}
-        for txt_idx, text_node in document.text_nodes.items():
-            meta_text[txt_idx] = {"nearest_common_ancestor": nearest_common_ancestor(im_node["path_to_root"],
-                                                                                     text_node["path_to_root"]),
-                                  "is_parent": is_parent(im_node["path_to_root"], text_node["text_tree_id"]),
-                                  "relative_depth": im_node["depth"] - text_node["depth"],
-                                  "tag": text_node["tag"]}
-        document.image_nodes[im_idx]["meta_text"] = meta_text
-        document.image_nodes[im_idx].pop("path_to_root")
+        meta_text = []
+        for txt_idx, text_node in txt_copy.items():
+            meta_text.append({"text_idx": txt_idx,
+                              "nearest_common_ancestor": nearest_common_ancestor(im_node["path_to_root"],
+                                                                                 text_node["path_to_root"]),
+                              "is_parent": is_parent(im_node["path_to_root"], text_node["text_tree_id"]),
+                              "relative_depth": im_node["depth"] - text_node["depth"]})
+            if im_idx == "#000000":
+                document.text_nodes[txt_idx].pop("path_to_root")
+                
+        im_node.pop("path_to_root")
+        im_node["img_idx"] = im_idx
+        im_node["meta_text"] = meta_text
+        document.image_nodes.append(im_node)
+        document.text_nodes = [{"text_idx": k, **v} for k, v in txt_copy.items()]
     return document
 
 
