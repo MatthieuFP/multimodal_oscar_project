@@ -50,9 +50,11 @@ def build_graph(document: SaveDocument):
     for im_idx, im_node in img_copy.items():
         meta_text = []
         for txt_idx, text_node in txt_copy.items():
+            nca = nearest_common_ancestor(im_node["path_to_root"], text_node["path_to_root"])
             meta_text.append({"text_idx": txt_idx,
-                              "nearest_common_ancestor": nearest_common_ancestor(im_node["path_to_root"],
-                                                                                 text_node["path_to_root"]),
+                              "nearest_common_ancestor": nca,
+                              "shortest_path": im_node["depth"] - (len(im_node["path_to_root"]) - nca) +
+                                               text_node["depth"] - (len(text_node["path_to_root"]) - nca),
                               "is_parent": is_parent(im_node["path_to_root"], text_node["text_tree_id"]),
                               "relative_depth": im_node["depth"] - text_node["depth"]})
                 

@@ -56,6 +56,14 @@ def save_node(node_ctx: DOMContext, Document: SaveDocument):
                     sample = {"tag": node.tag, "depth": depth, "text": text, "text_tree_id": Document.node_idx,
                               "path_to_root": Document.current_path_to_root}
 
+                    lang_pred = ""
+                    labels, scores = model.predict(text, 3)
+                    for lab, s in zip(labels, scores):
+                        if lang_pred:
+                            lang_pred += "||"
+                        lang_pred += lab + "||" + str(scores[0])[:5]
+
+                    sample["lang_pred"] = lang_pred
                     # Add text node to document
                     txt_idx = Document.cur_txt_idx
                     Document.text_nodes[txt_idx] = sample
@@ -132,6 +140,7 @@ if __name__ == "__main__":
                     pa.struct([
                         pa.field("text_idx", pa.string()),
                         pa.field("nearest_common_ancestor", pa.int32()),
+                        pa.field("shortest_path", pa.int32()),
                         pa.field("is_parent", pa.int32()),
                         pa.field("relative_depth", pa.int32())
                     ])
@@ -144,7 +153,8 @@ if __name__ == "__main__":
                 pa.field("tag", pa.string()),
                 pa.field("depth", pa.int32()),
                 pa.field("text", pa.string()),
-                pa.field("text_tree_id", pa.string())
+                pa.field("text_tree_id", pa.string()),
+                pa.field("lang_pred", pa.string())
             ])
         ))
     ])
