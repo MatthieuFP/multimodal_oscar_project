@@ -1,4 +1,5 @@
 import copy
+import multiprocessing
 
 
 class SaveDocument:
@@ -6,6 +7,7 @@ class SaveDocument:
         self.image_nodes = {}
         self.text_nodes = {}
         self.url = {}
+        self.raw_text = {}
         self.lang = ""
         self.alt_detected = False
         self.prev_depth = None
@@ -19,8 +21,14 @@ class SaveDocument:
     def add_url(self, url):
         self.url[url] = 1
 
+    def add_text(self, text):
+        self.raw_text[text] = 1
+
     def check_url(self, url):
         return True if url in self.url.keys() else False
+
+    def check_text(self, text):
+        return True if text in self.raw_text.keys() else False
 
     def is_valid(self):
         if not self.image_nodes:
@@ -43,9 +51,10 @@ class SaveDocument:
         self.current_path_to_root = self.current_path_to_root[:depth]
 
 
-def build_graph(document: SaveDocument):
+def build_graph(document: SaveDocument):  # O(T * I) not good but how to do better?
     img_copy = copy.deepcopy(document.image_nodes)
     txt_copy = copy.deepcopy(document.text_nodes)
+    T, I = len(txt_copy), len(img_copy)
     document.image_nodes = []
     for im_idx, im_node in img_copy.items():
         meta_text = []
@@ -66,6 +75,15 @@ def build_graph(document: SaveDocument):
         document.text_nodes = [{"text_idx": k, **{_k: _v for _k, _v in v.items() if _k != "path_to_root"}}
                                for k, v in txt_copy.items()]
     return document
+
+def build_text_edge(im_node, txt_idx, text_node):
+    nca = nearest_common_ancestor(im_node["path_to_root"], text_node["path_to_root"])
+    return {"text_idx": txt_idx,
+            "nearest_common_ancestor": nca,
+            "shortest_path": im_node["depth"] - (len(im_node["path_to_root"]) - nca) +
+                             text_node["depth"] - (len(text_node["path_to_root"]) - nca),
+            "is_parent": is_parent(im_node["path_to_root"], text_node["text_tree_id"]),
+            "relative_depth": im_node["depth"] - text_node["depth"]}
 
 
 def nearest_common_ancestor(path_root_img, path_root_txt):

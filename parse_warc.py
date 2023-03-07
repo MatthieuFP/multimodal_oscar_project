@@ -7,6 +7,7 @@ from tqdm import tqdm
 from fastwarc.warc import ArchiveIterator, is_http
 from fastwarc.stream_io import *
 from resiliparse.parse.html import HTMLTree, traverse_dom, DOMNode, DOMContext
+import multiprocessing as mp
 from multiprocessing import Pool, cpu_count
 import pyarrow.parquet as pq
 import pyarrow as pa
@@ -26,6 +27,7 @@ stream = GZipStream(open(path, 'rb'))
 def save_node(node_ctx: DOMContext, Document: SaveDocument):
     node = node_ctx.node
     depth = node_ctx.depth
+
     if Document.prev_depth is None:
         Document.prev_depth = depth
     if depth < len(Document.current_path_to_root):
@@ -34,7 +36,12 @@ def save_node(node_ctx: DOMContext, Document: SaveDocument):
     if node.tag == "img":
         if "src" in node.attrs and node["src"].startswith("http") and node["src"].endswith(
                 ("jpg", "jpeg", "png")):
-            sample = {"url": node["src"], "depth": depth, "alt": "", "path_to_root": Document.current_path_to_root}
+
+            itemprop = node["itemprop"] if "itemprop" in node.attrs else ""
+            itemtype = node["itemtype"] if "itemtype" in node.attrs else ""
+
+            sample = {"url": node["src"], "depth": depth, "alt": "", "itemprop": itemprop, "itemtype": itemtype,
+                      "path_to_root": Document.current_path_to_root}
             if not Document.check_url(node["src"]):
                 Document.add_url(node["src"])
                 if "alt" in node.attrs:
@@ -50,24 +57,27 @@ def save_node(node_ctx: DOMContext, Document: SaveDocument):
     else:
         if node.tag == "p" or (node.tag.startswith("h") and len(node.tag) == 2):
             if node.text:
-                text = node.text.strip().strip("\n")
-                text = text.replace("\t", "").replace("\n", "").strip()
+                text = node.text.replace("\t", "").replace("\n", "").strip()
                 if text:
-                    sample = {"tag": node.tag, "depth": depth, "text": text, "text_tree_id": Document.node_idx,
-                              "path_to_root": Document.current_path_to_root}
+                    if not Document.check_text(text):
+                        itemprop = node["itemprop"] if "itemprop" in node.attrs else ""
+                        itemtype = node["itemtype"] if "itemtype" in node.attrs else ""
 
-                    lang_pred = ""
-                    labels, scores = model.predict(text, 3)
-                    for lab, s in zip(labels, scores):
-                        if lang_pred:
-                            lang_pred += "||"
-                        lang_pred += lab + "||" + str(scores[0])[:5]
+                        sample = {"tag": node.tag, "depth": depth, "text": text, "text_tree_id": Document.node_idx,
+                                  "itemprop": itemprop, "itemtype": itemtype, "path_to_root": Document.current_path_to_root}
 
-                    sample["lang_pred"] = lang_pred
-                    # Add text node to document
-                    txt_idx = Document.cur_txt_idx
-                    Document.text_nodes[txt_idx] = sample
-                    Document.increment_idx(text_node=True)
+                        lang_pred = ""
+                        labels, scores = model.predict(text, 3)
+                        for lab, s in zip(labels, scores):
+                            if lang_pred:
+                                lang_pred += "||"
+                            lang_pred += lab + "||" + str(s)[:5]
+
+                        sample["lang_pred"] = lang_pred
+                        # Add text node to document
+                        txt_idx = Document.cur_txt_idx
+                        Document.text_nodes[txt_idx] = sample
+                        Document.increment_idx(text_node=True)
 
     Document.current_path_to_root.append(Document.node_idx)
     Document.increment_node_idx()
@@ -99,10 +109,11 @@ def process_html(record):
 def main(params):
     warc_iter = ArchiveIterator(stream, func_filter=is_http)
     if not params.disable_multiprocessing:
-        pool = Pool(cpu_count())
+        print(f"Number of processes: {cpu_count()}")
+        pool = Pool(20)  # cpu_count() // 2
         iterator = pool.imap_unordered(process_html, warc_iter)
         iterator = tqdm(iterator, desc='Processing HTML')
-        out = {k: v for sample in iterator if sample is not None for k, v in sample.items()}
+        out = [sample for sample in iterator if sample is not None]
     else:
         out = []
         for record in tqdm(warc_iter, desc='Processing HTML'):
@@ -161,5 +172,5 @@ if __name__ == "__main__":
 
     # Convert the nested dictionary to a PyArrow Table
     table = pa.Table.from_pylist(out, schema=schema)
-    
     pdb.set_trace()
+    # table.take([idx_row])
