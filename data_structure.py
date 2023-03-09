@@ -1,21 +1,25 @@
 import copy
+import time
 import multiprocessing
 
 
 class SaveDocument:
     def __init__(self):
         self.image_nodes = {}
+        self.video_nodes = {}
         self.text_nodes = {}
         self.url = {}
         self.raw_text = {}
         self.lang = ""
         self.alt_detected = False
+        self.has_video = False
         self.prev_depth = None
         self.current_path_to_root = []
 
         # Def idx
         self.cur_txt_idx = "#000000"
         self.cur_img_idx = "#000000"
+        self.cur_vid_idx = "#000000"
         self.node_idx = '0'
 
     def add_url(self, url):
@@ -38,11 +42,13 @@ class SaveDocument:
         else:
             return True
 
-    def increment_idx(self, text_node=False):
+    def increment_idx(self, text_node=False, img_node=False):
         if text_node:
             self.cur_txt_idx = "#" + str(int(self.cur_txt_idx[1:]) + 1).zfill(6)
-        else:
+        elif img_node:
             self.cur_img_idx = "#" + str(int(self.cur_img_idx[1:]) + 1).zfill(6)
+        else:
+            self.cur_vid_idx = "#" + str(int(self.cur_vid_idx[1:]) + 1).zfill(6)
 
     def increment_node_idx(self):
         self.node_idx = str(int(self.node_idx) + 1)
@@ -51,11 +57,11 @@ class SaveDocument:
         self.current_path_to_root = self.current_path_to_root[:depth]
 
 
-def build_graph(document: SaveDocument):  # O(T * I) not good but how to do better?
+def build_graph(document: SaveDocument):
     img_copy = copy.deepcopy(document.image_nodes)
+    vid_copy = copy.deepcopy(document.video_nodes)
     txt_copy = copy.deepcopy(document.text_nodes)
-    T, I = len(txt_copy), len(img_copy)
-    document.image_nodes = []
+    document.image_nodes, document.video_nodes = [], []
     for im_idx, im_node in img_copy.items():
         meta_text = []
         for txt_idx, text_node in txt_copy.items():
@@ -72,9 +78,26 @@ def build_graph(document: SaveDocument):  # O(T * I) not good but how to do bett
         im_node["meta_text"] = meta_text
         document.image_nodes.append(im_node)
 
-        document.text_nodes = [{"text_idx": k, **{_k: _v for _k, _v in v.items() if _k != "path_to_root"}}
-                               for k, v in txt_copy.items()]
+    for vid_idx, vid_node in vid_copy.items():
+        meta_text = []
+        for txt_idx, text_node in txt_copy.items():
+            nca = nearest_common_ancestor(vid_node["path_to_root"], text_node["path_to_root"])
+            meta_text.append({"text_idx": txt_idx,
+                              "nearest_common_ancestor": nca,
+                              "shortest_path": vid_node["depth"] - (len(vid_node["path_to_root"]) - nca) +
+                                               text_node["depth"] - (len(text_node["path_to_root"]) - nca),
+                              "is_parent": is_parent(vid_node["path_to_root"], text_node["text_tree_id"]),
+                              "relative_depth": vid_node["depth"] - text_node["depth"]})
+
+        vid_node.pop("path_to_root")
+        vid_node["img_idx"] = vid_idx
+        vid_node["meta_text"] = meta_text
+        document.video_nodes.append(vid_node)
+
+    document.text_nodes = [{"text_idx": k, **{_k: _v for _k, _v in v.items() if _k != "path_to_root"}}
+                            for k, v in txt_copy.items()]
     return document
+
 
 def build_text_edge(im_node, txt_idx, text_node):
     nca = nearest_common_ancestor(im_node["path_to_root"], text_node["path_to_root"])
